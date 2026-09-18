@@ -90,20 +90,25 @@ export class Voice {
     u.onboundary = (e) => {
       if (text.length) onBoundary?.(Math.min(1, (e.charIndex || 0) / text.length));
     };
+    // 음성 엔진이 시작 전에 실패하면(한국어 음성 미설치 등) 무음 모드로 전환한다.
+    // 그냥 끝내버리면 캐릭터가 말도 못 하고 립싱크도 하지 않는 상태가 된다.
+    const fallbackToSilent = () => {
+      if (started || ended) return;
+      started = true;
+      clearTimeout(this.watchdog);
+      window.speechSynthesis.cancel();
+      silent();
+    };
+
     u.onend = finish;
-    u.onerror = finish;
+    u.onerror = () => (started ? finish() : fallbackToSilent());
 
     this.current = u;
     window.speechSynthesis.speak(u);
 
     // 설치된 음성이 없는 환경(헤드리스 등)에서는 onstart가 끝내 오지 않는다.
     // 800ms 안에 시작되지 않으면 무음 모드로 전환해 캐릭터가 멈추지 않게 한다.
-    this.watchdog = setTimeout(() => {
-      if (!started) {
-        window.speechSynthesis.cancel();
-        silent();
-      }
-    }, 800);
+    this.watchdog = setTimeout(fallbackToSilent, 800);
 
     return { msPerSyllable };
   }

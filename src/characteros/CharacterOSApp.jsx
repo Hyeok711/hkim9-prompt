@@ -113,7 +113,7 @@ export default function CharacterOSApp() {
                 />
               )}
               {tab === 'brain' && (
-                <BrainPanel brain={os.brain} stage={os.stage} trace={os.trace} engine={os.engine} />
+                <BrainPanel brain={os.brain} stage={os.stage} trace={os.trace} engine={os.engine} latency={os.latency} />
               )}
               {tab === 'perception' && (
                 <PerceptionPanel

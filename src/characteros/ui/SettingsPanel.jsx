@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Chip, Field, Panel, Toggle, inputClass } from './parts';
-import { PROVIDERS } from '../config';
+import { BEHAVIOR_FLAG_LABELS, DEFAULT_BEHAVIOR_FLAGS, PROVIDERS } from '../config';
 import { listKoreanVoices, isTTSSupported } from '../behavior/voice';
 
 export default function SettingsPanel({ settings, onChange, onReset }) {
@@ -57,6 +57,40 @@ export default function SettingsPanel({ settings, onChange, onReset }) {
             </Field>
           </>
         )}
+      </Panel>
+
+      <Panel
+        title="비언어 행동 A/B"
+        subtitle="하나씩 꺼보세요. 말의 내용은 그대로인데 '살아있는 느낌'만 사라집니다."
+        right={(
+          <Toggle
+            on={false}
+            onClick={() => onChange({ behavior: { ...DEFAULT_BEHAVIOR_FLAGS } })}
+          >
+            전부 켜기
+          </Toggle>
+        )}
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {Object.keys(DEFAULT_BEHAVIOR_FLAGS).map((key) => {
+            const on = (settings.behavior || DEFAULT_BEHAVIOR_FLAGS)[key] !== false;
+            return (
+              <Toggle
+                key={key}
+                on={on}
+                onClick={() => onChange({
+                  behavior: { ...DEFAULT_BEHAVIOR_FLAGS, ...(settings.behavior || {}), [key]: !on },
+                })}
+              >
+                {BEHAVIOR_FLAG_LABELS[key]}
+              </Toggle>
+            );
+          })}
+        </div>
+        <p className="mt-2.5 text-[11px] leading-relaxed text-slate-500">
+          <span className="text-slate-400">즉시 반응</span>을 끄면 캐릭터는 외부 AI가 답을 줄 때까지
+          아무 반응도 하지 않습니다. 그 몇 초가 &apos;존재&apos;와 &apos;프로그램&apos;을 가릅니다.
+        </p>
       </Panel>
 
       <Panel title="목소리" subtitle="voice_style에 따라 속도와 피치가 달라진다.">

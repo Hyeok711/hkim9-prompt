@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { Chip, Meter, Panel } from './parts';
-import { emotionOf } from '../config';
+import { LATENCY_TARGETS, emotionOf } from '../config';
 import { STAGES } from '../brain/relationship';
 
-export default function BrainPanel({ brain, stage, trace, engine }) {
+export default function BrainPanel({ brain, stage, trace, engine, latency }) {
   const e = emotionOf(brain.emotion.id);
   const rel = brain.relationship;
   const notes = brain.episodes.filter((ep) => ep.role === 'note' || ep.salience >= 0.75).slice(-6).reverse();
@@ -49,6 +49,31 @@ export default function BrainPanel({ brain, stage, trace, engine }) {
         <p className="mt-2 text-[11px] text-slate-400">
           누적 {rel.turns}턴 · 처음 만난 날 {new Date(rel.firstMetAt).toLocaleDateString('ko-KR')}
         </p>
+      </Panel>
+
+      <Panel
+        title="응답 시간"
+        subtitle="Phase 0 종료 조건: 첫 비언어 반응 ≤ 300ms, 첫 음성 ≤ 1.5s."
+      >
+        {latency ? (
+          <div className="space-y-1.5">
+            <LatencyRow
+              label="첫 비언어 반응"
+              value={latency.firstReactionMs}
+              target={LATENCY_TARGETS.firstReaction}
+              note="LLM을 기다리지 않는 구간"
+            />
+            <LatencyRow label="Provider 왕복" value={latency.providerMs} target={800} note="외부 AI 응답" />
+            <LatencyRow
+              label="첫 음성"
+              value={latency.firstVoiceMs}
+              target={LATENCY_TARGETS.firstVoice}
+              note="반응 지연 연출 포함"
+            />
+          </div>
+        ) : (
+          <p className="text-[11.5px] text-slate-500">아직 측정된 턴이 없습니다.</p>
+        )}
       </Panel>
 
       <Panel title="Motivation / Decision" subtitle="지금 캐릭터가 무엇을 하려는지.">
@@ -115,6 +140,23 @@ export default function BrainPanel({ brain, stage, trace, engine }) {
           </div>
         )}
       </Panel>
+    </div>
+  );
+}
+
+function LatencyRow({ label, value, target, note }) {
+  const has = Number.isFinite(value);
+  const ok = has && value <= target;
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-[11.5px]">
+      <span className="text-slate-300">
+        {label}
+        <span className="ml-1.5 text-[10.5px] text-slate-500">{note}</span>
+      </span>
+      <span className={`shrink-0 tabular-nums ${!has ? 'text-slate-600' : ok ? 'text-emerald-300' : 'text-amber-300'}`}>
+        {has ? `${value}ms` : '—'}
+        <span className="ml-1 text-slate-600">/ {target}ms</span>
+      </span>
     </div>
   );
 }

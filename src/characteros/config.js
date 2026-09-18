@@ -101,6 +101,29 @@ export const PROVIDERS = {
   },
 };
 
+/**
+ * 비언어 행동 A/B 토글 (검토 의견 1-2).
+ * 하나씩 끄면서 "이게 있고 없고가 체감을 얼마나 바꾸는가"를 직접 비교하기 위한 스위치.
+ * Phase 0의 진짜 질문은 기능 개수가 아니라 이 차이의 크기다.
+ */
+export const DEFAULT_BEHAVIOR_FLAGS = {
+  instantAck: true,     // 말을 듣자마자 즉시 반응 (LLM 기다리지 않음)
+  gazeFollow: true,     // 시선이 사용자를 따라감
+  blink: true,          // 자발적 깜빡임
+  breath: true,         // 호흡
+  reactionDelay: true,  // 말하기 전의 침묵 연출
+  lipSync: true,        // 립싱크
+};
+
+export const BEHAVIOR_FLAG_LABELS = {
+  instantAck: '즉시 반응',
+  gazeFollow: '시선 추종',
+  blink: '깜빡임',
+  breath: '호흡',
+  reactionDelay: '반응 지연',
+  lipSync: '립싱크',
+};
+
 export const DEFAULT_SETTINGS = {
   providerId: 'local',
   model: '',
@@ -113,6 +136,13 @@ export const DEFAULT_SETTINGS = {
   sendPerceptionSummary: true,
   memoryTopK: 4,
   debugOverlay: false,
+  behavior: { ...DEFAULT_BEHAVIOR_FLAGS },
+};
+
+/** Phase 0 종료 조건 (검토 의견 1-1): 눈으로 확인 가능한 수치 목표 */
+export const LATENCY_TARGETS = {
+  firstReaction: 300,  // 발화 종료 → 첫 비언어 반응 (ms)
+  firstVoice: 1500,    // 발화 종료 → 첫 음성 (ms)
 };
 
 /** 행동 루프 주기 (ms) */

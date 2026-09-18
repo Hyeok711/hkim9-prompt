@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_SETTINGS } from './config';
+import { DEFAULT_BEHAVIOR_FLAGS, DEFAULT_SETTINGS } from './config';
 import {
   forgetEverything, loadBrainState, saveBrainState, takeTurn, tickEmotion,
 } from './brain/characterBrain';
@@ -42,6 +42,7 @@ export function useCharacterOS() {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
   const [notice, setNotice] = useState(null);
+  const [latency, setLatency] = useState(null);
 
   const brainRef = useRef(brain);
   const settingsRef = useRef(settings);
@@ -49,6 +50,7 @@ export function useCharacterOS() {
   const pointerRef = useRef({ x: 0, y: 0 });
   const textMoodRef = useRef('neutral');
   const userStateRef = useRef(emptyUserState());
+  const speakingRef = useRef(false);
 
   const engine = useMemo(() => new BehaviorEngine(), []);
   const lipSync = useMemo(() => new LipSync(), []);
@@ -61,6 +63,21 @@ export function useCharacterOS() {
     settingsRef.current = settings;
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* 무시 */ }
   }, [settings]);
+
+  /** Barge-in — 캐릭터가 말하는 중에 사용자가 끼어들면 즉시 멈춘다. */
+  const bargeIn = useCallback(() => {
+    if (!speakingRef.current) return;
+    voice.cancel();
+    lipSync.stop();
+    engine.interrupt();
+    speakingRef.current = false;
+    setSpeaking(false);
+  }, [voice, lipSync, engine]);
+
+  // A/B 토글을 엔진에 전달한다.
+  useEffect(() => {
+    engine.setFlags({ ...DEFAULT_BEHAVIOR_FLAGS, ...(settings.behavior || {}) });
+  }, [engine, settings.behavior]);
 
   // 립싱크를 Behavior Engine에 주입한다.
   useEffect(() => {
@@ -80,9 +97,11 @@ export function useCharacterOS() {
       userStateRef.current = merged;
       setUserState(merged);
       engine.setUserGaze(merged.gaze.x, merged.gaze.y);
+      // 마이크가 켜져 있고 사용자가 말을 시작하면 캐릭터는 말을 멈춘다.
+      if (merged.sources.microphone && merged.speaking && speakingRef.current) bargeIn();
     }, 200);
     return () => clearInterval(id);
-  }, [engine, audio, vision]);
+  }, [engine, audio, vision, bargeIn]);
 
   /* ------------------------------------------- 감정 감쇠 + 기본 표정 (2Hz) */
   useEffect(() => {
@@ -106,10 +125,19 @@ export function useCharacterOS() {
 
   /* --------------------------------------------------------- 한 턴 실행 */
   const runTurn = useCallback(async (utterance, { proactive = false } = {}) => {
+    bargeIn();
     if (busyRef.current) return;
     busyRef.current = true;
+    const t0 = performance.now();
     setThinking(true);
     setNotice(null);
+
+    // ── 2단 응답의 1단: LLM을 기다리지 않고 "들었다"는 반응을 즉시 낸다.
+    //    (검토 의견 1-1 — 사람은 300ms 안에 아무 반응이 없으면 기계로 판정한다)
+    const heard = moodFromText(utterance) === 'down';
+    engine.acknowledge({ heavy: heard });
+    const firstReactionMs = Math.round(performance.now() - t0);
+    setLatency({ firstReactionMs, providerMs: null, firstVoiceMs: null });
 
     if (utterance) {
       textMoodRef.current = moodFromText(utterance);
@@ -136,6 +164,7 @@ export function useCharacterOS() {
       setBrain(state);
       saveBrainState(state);
       setTrace(t);
+      setLatency((l) => ({ ...(l || {}), providerMs: t.meta.ms }));
       if (t.meta.error) setNotice(`${t.meta.fallbackFrom} 호출 실패 → 로컬 엔진으로 대체: ${t.meta.error}`);
 
       engine.setBase({
@@ -171,12 +200,15 @@ export function useCharacterOS() {
         onStart: () => {
           lipSync.start(response.speech, { msPerSyllable });
           engine.setSpeaking(true);
+          speakingRef.current = true;
           setSpeaking(true);
+          setLatency((l) => ({ ...(l || {}), firstVoiceMs: Math.round(performance.now() - t0) }));
         },
         onBoundary: (p) => lipSync.resync(p),
         onEnd: () => {
           lipSync.stop();
           engine.setSpeaking(false);
+          speakingRef.current = false;
           setSpeaking(false);
         },
       });
@@ -186,7 +218,7 @@ export function useCharacterOS() {
     } finally {
       busyRef.current = false;
     }
-  }, [engine, lipSync, voice, audio, vision]);
+  }, [engine, lipSync, voice, audio, vision, bargeIn]);
 
   /* ------------------------------------- 침묵이 길어지면 캐릭터가 먼저 말한다 */
   useEffect(() => {
@@ -278,6 +310,8 @@ export function useCharacterOS() {
     userState,
     thinking,
     speaking,
+    latency,
+    bargeIn,
     listening,
     engine,
     audioPerception: audio,

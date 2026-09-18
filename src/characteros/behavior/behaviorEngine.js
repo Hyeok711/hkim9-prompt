@@ -8,7 +8,7 @@
  * 시선 유지 시간, 반응 지연, 고개 각도, 호흡, 미소 강도를 다르게 조합한다.
  */
 
-import { emotionOf } from '../config';
+import { DEFAULT_BEHAVIOR_FLAGS, emotionOf } from '../config';
 import { GAZE_TARGETS, GESTURE_TO_PRIMITIVE, PRIMITIVES } from './primitives';
 
 const ZERO_POSE = {
@@ -38,6 +38,7 @@ export class BehaviorEngine {
     // setBase()가 처음 불리기 전에도 update()가 유효한 값을 내도록 초기화한다.
     this.arousal = 0.2;
     this.closeness = 0.2;
+    this.flags = { ...DEFAULT_BEHAVIOR_FLAGS };
     this.personality = { warmth: 0.5, expressiveness: 0.5, reserve: 0.5, curiosity: 0.5, stability: 0.5, playfulness: 0.5 };
   }
 
@@ -67,6 +68,39 @@ export class BehaviorEngine {
     this.closeness = closeness;
   }
 
+  /** A/B 토글 (검토 의견 1-2) — 비언어 요소를 하나씩 끄고 체감 차이를 비교한다. */
+  setFlags(flags) {
+    this.flags = { ...DEFAULT_BEHAVIOR_FLAGS, ...(flags || {}) };
+  }
+
+  /**
+   * 들었다는 신호를 즉시 낸다 (검토 의견 1-1, 2단 응답 구조의 앞단).
+   * LLM을 기다리지 않는다. 사용자가 말을 끝낸 순간 300ms 안에 실행되는 것이 목표.
+   */
+  acknowledge({ heavy = false } = {}) {
+    if (!this.flags.instantAck) return;
+    this.setGaze('user_eyes');
+    this.play('GAZE_RETURN', { amplitude: 0.9 });
+    this.play('BLINK');
+    this.play(heavy ? 'SMALL_INHALE' : 'NOD', {
+      amplitude: heavy ? 0.7 : 0.45 + this.personality.expressiveness * 0.3,
+      delay: 60,
+    });
+  }
+
+  /**
+   * Barge-in (검토 의견 2-4): 말하는 중에 사용자가 끼어들면 즉시 멈추고 듣는 자세로.
+   * 사람이 말을 끊었는데 계속 떠드는 것만큼 '기계'로 보이는 것이 없다.
+   */
+  interrupt() {
+    this.setSpeaking(false);
+    this.active = this.active.filter((a) => a.name !== 'MICRO_SMILE');
+    this.setGaze('user_eyes');
+    this.play('BLINK');
+    this.play('SMALL_INHALE', { amplitude: 0.4 });
+    this.log = [{ name: 'BARGE_IN', label: '말 멈춤(끼어듦)', at: Date.now(), amplitude: 1 }, ...this.log].slice(0, 12);
+  }
+
   /** 사용자의 실제 위치(카메라/포인터) — 시선이 사람을 따라가게 한다. */
   setUserGaze(x, y) {
     this.userGaze = { x: x || 0, y: y || 0 };
@@ -94,10 +128,9 @@ export class BehaviorEngine {
     const p = personality;
     // 반응 지연: 모델 제안값 + 조심스러운 성격 + 무거운 감정일수록 길게.
     const heaviness = response.emotion === 'sadness' || response.emotion === 'concern' ? 1 : 0;
-    const delayMs = Math.min(
-      3000,
-      response.speech_delay * 1000 * (0.7 + p.reserve * 0.7) + heaviness * 220,
-    );
+    const delayMs = this.flags.reactionDelay
+      ? Math.min(3000, response.speech_delay * 1000 * (0.7 + p.reserve * 0.7) + heaviness * 220)
+      : 0;
 
     if (delayMs > 700) {
       this.play('HESITATION', { amplitude: 0.5 + p.reserve * 0.5 });
@@ -147,7 +180,7 @@ export class BehaviorEngine {
     const target = { ...this.base };
 
     // 2) 시선: 캐릭터가 사용자를 볼 때는 실제 사용자 위치를 따라간다.
-    const lock = this.gazeTarget.lock ?? 0;
+    const lock = this.flags.gazeFollow ? (this.gazeTarget.lock ?? 0) : 0;
     const gx = this.gazeTarget.x + this.userGaze.x * lock * 0.55;
     const gy = this.gazeTarget.y + this.userGaze.y * lock * 0.4;
     target.gazeX = gx;
@@ -169,10 +202,12 @@ export class BehaviorEngine {
 
     // 4) 호흡 — 각성도가 높을수록 빠르고 얕게.
     const breathHz = 0.2 + this.arousal * 0.22;
-    target.breath = Math.sin((now / 1000) * breathHz * Math.PI * 2) * 0.5 + 0.5;
+    target.breath = this.flags.breath
+      ? Math.sin((now / 1000) * breathHz * Math.PI * 2) * 0.5 + 0.5
+      : 0.5;
 
     // 5) 자발적 깜빡임 — 각성도가 높으면 잦아진다.
-    if (now > this.nextBlinkAt) {
+    if (this.flags.blink && now > this.nextBlinkAt) {
       this.play(Math.random() < 0.18 ? 'SLOW_BLINK' : 'BLINK');
       const mean = 4200 - this.arousal * 1800;
       this.nextBlinkAt = now + mean * (0.55 + Math.random());
@@ -190,7 +225,7 @@ export class BehaviorEngine {
     }
 
     // 7) 립싱크는 다른 표정 위에 덧씌운다.
-    if (this.speaking) {
+    if (this.speaking && this.flags.lipSync) {
       if (this.visemeSource) this.viseme = this.visemeSource(now);
       target.mouthOpen = Math.max(target.mouthOpen, this.viseme.open);
       target.mouthWide = Math.max(target.mouthWide, this.viseme.wide);
